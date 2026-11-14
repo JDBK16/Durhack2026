@@ -1,5 +1,5 @@
 from Visualisation2D import visualise_sequence
-from word_tree import words_path, extract_words
+from word_tree import word_to_turns, extract_words
 from word_processing import words
 
 import random
@@ -84,7 +84,10 @@ if __name__ == "__main__":
     ap.add_argument("-w2", "--word2", required=True, help="Second word to encoding")
     ap.add_argument("-w3", "--word3", required=True, help="Third word to encoding")
     ap.add_argument("-o", "--ouput", default="proteins", help="Output directory for visualisation")
+    ap.add_argument("-s", "--seed", default=1, help="Seed for random number generator")
 
+    set_seed = int(ap.parse_args().seed)
+    random.seed(set_seed)
     args = ap.parse_args()
 
     words = extract_words()
@@ -95,8 +98,11 @@ if __name__ == "__main__":
     word_combined = f"{args.word1}_{args.word2}_{args.word3}"
 
     print("Combined word length:", word_combined)
-    print("Moves required:", words_path(words, args.word1, args.word2, args.word3))
-    word_sequence = fold(words_path(words, args.word1, args.word2, args.word3))
+    w1 = word_to_turns(words, args.word1)
+    w2 = word_to_turns(words, args.word2)
+    w3 = word_to_turns(words, args.word3)
+    print("Moves required:", w1, w2, w3)
+    word_sequence = fold(w1 + w2 + w3)
     if word_sequence is None:
         print("No valid folding sequence found for the given words.")
     else:
