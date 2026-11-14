@@ -1,9 +1,9 @@
 # Extract the words from the durchack_word_list.csv into an array
-def extract_words():
+def extract_words(filepath="durhack_word_list.csv"):
     words = []
-    with open("durhack_word_list.csv") as doc:
+    with open(filepath) as doc:
         for line in doc.readlines():
-            words.append(line.strip())
+            words.append(line.replace("\n", ""))
     return words
 
 # Create a ternary tree of depth 10 with the first 30k leafs as words

@@ -1,6 +1,6 @@
 from Visualisation2D import visualise_sequence
-from word_tree import word_to_turns, extract_words
 from word_processing import words
+from word_tree import extract_words, word_to_turns
 
 import random
 import argparse
