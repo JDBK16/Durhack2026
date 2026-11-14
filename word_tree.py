@@ -8,10 +8,10 @@ def extract_words():
 word_exhaust = extract_words()
 def rec_tree(depth):
     if depth == 0:
-        global words_exhaust
-        if len(words_exhaust) > 0:
-            word = words_exhaust[0]
-            words_exhaust = words_exhaust[1:]
+        global word_exhaust
+        if len(word_exhaust) > 0:
+            word = word_exhaust[0]
+            word_exhaust = word_exhaust[1:]
             return [word]
         return []
     return [rec_tree(depth-1), rec_tree(depth-1), rec_tree(depth-1)]
@@ -47,4 +47,4 @@ def words_path(words, w1, w2, w3):
     turns = path_to_turns(p1) + path_to_turns(p2) + path_to_turns(p3)
     return turns
 
-path = words_path(extract_words, "zygodactyl", "zygomorphous", "zygotene")
+#path = words_path(extract_words, "zygodactyl", "zygomorphous", "zygotene")

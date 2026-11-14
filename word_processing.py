@@ -78,5 +78,5 @@ def words_path(words, w1, w2, w3):
     turns = path_to_turns(p1) + path_to_turns(p2) + path_to_turns(p3)
     return turns
 
-path = words_path(words_list, "adversely", "aeriform", "alertly")
-print(path)
+#path = words_path(words_list, "adversely", "aeriform", "alertly")
+#print(path)
