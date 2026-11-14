@@ -1,5 +1,6 @@
 from Visualisation2D import visualise_sequence
 from word_processing import words
+from word_tree import extract_words, word_to_turns
 
 import random
 import argparse
@@ -82,21 +83,12 @@ if __name__ == "__main__":
     ap.add_argument("-w1", "--word1", required=True, help="First word to encoding")
     ap.add_argument("-w2", "--word2", required=True, help="Second word to encoding")
     ap.add_argument("-w3", "--word3", required=True, help="Third word to encoding")
-    ap.add_argument("-c", "--custom", default=False, action="store_true", help="Use custom words instead of words from the word list")
     ap.add_argument("-o", "--ouput", default="proteins", help="Output directory for visualisation")
     ap.add_argument("-s", "--seed", default=1, help="Seed for random number generator")
 
     set_seed = int(ap.parse_args().seed)
     random.seed(set_seed)
     args = ap.parse_args()
-
-    if args.custom:
-        from alphabet import word_to_turns, extract_words
-    else:
-        from word_tree import word_to_turns, extract_words
-
-    words = [args.word1, args.word2, args.word3]
-
 
     words = extract_words()
     for word in [args.word1, args.word2, args.word3]:
