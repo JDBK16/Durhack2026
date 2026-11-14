@@ -15,7 +15,7 @@ OUTPUT_DIR = "data"
 
 H_COLOUR = "#c8402f"
 P_COLOUR = "#ffffff"
-EDGE = "#333333"
+EDGE = "#000000"
 CHAIN = "#555555"
 BEST = "#c8402f"
 CURRENT = "#9aa0a6"
@@ -87,7 +87,7 @@ def visualise_sequence(sequence, filename="sequence_visualisation.png", output_d
     output_dir.mkdir(parents=True, exist_ok=True)
 
     filename = output_dir / filename
-    plt.savefig(filename, dpi=300)
+    plt.savefig(filename, dpi=600)
     plt.close(fig)
 
 if __name__ == "__main__":
