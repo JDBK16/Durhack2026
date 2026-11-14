@@ -83,6 +83,7 @@ if __name__ == "__main__":
     ap.add_argument("-w1", "--word1", required=True, help="First word to encoding")
     ap.add_argument("-w2", "--word2", required=True, help="Second word to encoding")
     ap.add_argument("-w3", "--word3", required=True, help="Third word to encoding")
+    ap.add_argument("-o", "--ouput", default="proteins", help="Output directory for visualisation")
 
     args = ap.parse_args()
 
@@ -90,8 +91,13 @@ if __name__ == "__main__":
     for word in [args.word1, args.word2, args.word3]:
         if word not in words:
             raise ValueError(f"Word '{word}' not found in the word list.")
-    
-    print("Encoding words:", args.word1, args.word2, args.word3)
-    print(words_path(words, args.word1, args.word2, args.word3))
-    print(fold(words_path(words, args.word1, args.word2, args.word3)))
-    visualise_sequence(fold(words_path(words, args.word1, args.word2, args.word3)))
+        
+    word_combined = f"{args.word1}_{args.word2}_{args.word3}"
+
+    print("Combined word length:", word_combined)
+    print("Moves required:", words_path(words, args.word1, args.word2, args.word3))
+    word_sequence = fold(words_path(words, args.word1, args.word2, args.word3))
+    if word_sequence is None:
+        print("No valid folding sequence found for the given words.")
+    else:
+        visualise_sequence(sequence=word_sequence, filename=f"{word_combined}.png", output_dir=args.ouput)

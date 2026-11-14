@@ -7,6 +7,12 @@ import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation, FFMpegWriter, PillowWriter
 from matplotlib.collections import LineCollection
 
+from pathlib import Path
+
+
+SCRIPT_DIR = Path(__file__).parent
+OUTPUT_DIR = "data"
+
 H_COLOUR = "#c8402f"
 P_COLOUR = "#ffffff"
 EDGE = "#333333"
@@ -16,27 +22,13 @@ CURRENT = "#9aa0a6"
 TEMP = "#2a6fb0"
 NODE_SIZE = 150
 
-
-def contact_segments(sequence, coords):
-    """Line segments joining every pair of non-consecutive, adjacent H's."""
-    where = {c: i for i, c in enumerate(coords)}
-    segs = []
-    for i, (x, y) in enumerate(coords):
-        if sequence[i] != "H":
-            continue
-        for nb in ((x + 1, y), (x, y + 1)):          # each pair counted once
-            j = where.get(nb)
-            if j is not None and abs(i - j) > 1 and sequence[j] == "H":
-                segs.append([(x, y), nb])
-    return segs
-
 """
 Taking an input of a sequence of co-ordinates [x,y,type], this function visualises the sequence in a 2D lattice.
 The start node is indicated by a triangle
 H nodes are indicated by red circles
 P nodes are indicated by white squares
 """
-def visualise_sequence(sequence):
+def visualise_sequence(sequence, filename="sequence_visualisation.png", output_dir=OUTPUT_DIR):
     n = len(sequence)
 
     fig, ax = plt.subplots(figsize=(6, 6))
@@ -91,18 +83,18 @@ def visualise_sequence(sequence):
     fig.suptitle("2D Lattice Visualisation of Sequence", fontsize=16)
     plt.tight_layout(rect=[0, 0, 1, 0.99])
 
-    plt.savefig("sequence_visualisation.png")
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    filename = output_dir / filename
+    plt.savefig(filename, dpi=300)
     plt.close(fig)
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawTextHelpFormatter)
-    ap.add_argument("sequence", nargs="?", default="HPHPPHHPHPPHPHHPPHPH")
     args = ap.parse_args()
 
-    known = {"HPHPPHHPHPPHPHHPPHPH": -9, "HHPPHPPHPPHPPHPPHPPHPPHH": -9,
-             "PPHPPHHPPPPHHPPPPHHPPPPHH": -8}
-    
     matplotlib.use("Agg")
     import time
     t = time.time()
