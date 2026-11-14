@@ -1,3 +1,4 @@
+# Extract the words from the durchack_word_list.csv into an array
 def extract_words():
     words = []
     with open("durhack_word_list.csv") as doc:
@@ -5,6 +6,7 @@ def extract_words():
             words.append(line.strip())
     return words
 
+# Create a ternary tree of depth 10 with the first 30k leafs as words
 word_exhaust = extract_words()
 def rec_tree(depth):
     if depth == 0:
@@ -17,6 +19,7 @@ def rec_tree(depth):
     return [rec_tree(depth-1), rec_tree(depth-1), rec_tree(depth-1)]
 word_tree = rec_tree(10)
 
+# Conversts index in words array to path in word tree
 def index_to_path(index, depth=10):
     path = []
 
@@ -26,6 +29,7 @@ def index_to_path(index, depth=10):
 
     return path[::-1]
 
+# Converts path in word tree to turns in protein folding
 def path_to_turns(path):
     turns = ""
     for i in path:
@@ -37,14 +41,27 @@ def path_to_turns(path):
             turns += "R"
     return turns
 
-def words_path(words, w1, w2, w3):
-    i1 = words.index(w1)
-    i2 = words.index(w2)
-    i3 = words.index(w3)
-    p1 = index_to_path(i1, 10)
-    p2 = index_to_path(i2, 10)
-    p3 = index_to_path(i3, 10)
-    turns = path_to_turns(p1) + path_to_turns(p2) + path_to_turns(p3)
+# Turns a word into turns
+def word_to_turns(words, word):
+    i = words.index(word)
+    p = index_to_path(i, 10)
+    turns = path_to_turns(p)
     return turns
 
-#path = words_path(extract_words, "zygodactyl", "zygomorphous", "zygotene")
+# Converts protein folding turns into a path in the word tree
+def turns_to_path(turns):
+    indices = ""
+    for i in turns:
+        if i == "L":
+            indices += "0"
+        elif i == "F":
+            indices += "1"
+        else:
+            indices += "2"
+    return indices
+
+# Returns the word at the path in the word tree
+def traverse_word_tree(word_tree, i):
+    for index in i:
+        word_tree = word_tree[int(index)]
+    return word_tree[0]
