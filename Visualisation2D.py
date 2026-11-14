@@ -1,11 +1,7 @@
 import argparse
-import importlib
-import random
 
 import matplotlib
 import matplotlib.pyplot as plt
-from matplotlib.animation import FuncAnimation, FFMpegWriter, PillowWriter
-from matplotlib.collections import LineCollection
 
 from pathlib import Path
 
