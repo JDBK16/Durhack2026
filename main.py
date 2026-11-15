@@ -14,7 +14,7 @@ DIRECTIONS = [
 ]
 
 # Prevent beam search from wandering forever
-MAX_P_RUN = 100
+MAX_P_RUN = 100 # This is likely overkill, I didn't see any get this long
 
 
 class State:
@@ -26,6 +26,9 @@ class State:
 
 
 def turn_direction(direction, turn):
+    """
+    Changing direction based on turn instruction and current direction.
+    """
     dx, dy = direction
 
     if turn == "F":
@@ -102,6 +105,9 @@ def score_state(state, total_turns):
 
 
 def expand_state(state):
+    """
+    Generate all valid child states from the current state, considering both preferred and alternative moves
+    """
 
     if not state.turns:
         return []
@@ -174,6 +180,11 @@ def expand_state(state):
 
 
 def fold_beam(turns, beam_width=100):
+    """
+    Essentially best first search witha beam width limit
+
+    We are attempting to find a sequence of moves that minimises the energy of the protein structure (while also following encoding rules)
+    """
 
     total_turns = len(turns)
 
@@ -386,7 +397,13 @@ if __name__ == "__main__":
 
     random.seed(int(args.seed))
 
+    # If you want to use a different word list, you can specify it here. The default is "data/durhack_word_list.csv".
     words = extract_words()
+    
+    # If you want custom words, you need to change how word to turns works, you'll want to iterate over each letter in the word and convert it
+    """
+    words = extract_words("alphabet/alphabet.csv") 
+    """
 
     for word in [
         args.word1,
@@ -415,6 +432,7 @@ if __name__ == "__main__":
 
     print("Moves required:", w1, w2, w3)
 
+    #word_sequence = fold_beam(all_turns, beam_width=100)
     word_sequence = fold_beam(all_turns, beam_width=100)
 
     if word_sequence is None:
