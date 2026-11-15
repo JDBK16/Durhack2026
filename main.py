@@ -397,7 +397,13 @@ if __name__ == "__main__":
 
     random.seed(int(args.seed))
 
+    # If you want to use a different word list, you can specify it here. The default is "data/durhack_word_list.csv".
     words = extract_words()
+    
+    # If you want custom words, you need to change how word to turns works, you'll want to iterate over each letter in the word and convert it
+    """
+    words = extract_words("alphabet/alphabet.csv") 
+    """
 
     for word in [
         args.word1,
