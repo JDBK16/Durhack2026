@@ -1,5 +1,4 @@
 from Visualisation2D import visualise_sequence
-from word_processing import words
 from word_tree import extract_words, word_to_turns
 
 import random
