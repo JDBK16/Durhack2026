@@ -70,6 +70,13 @@ def traverse_word_tree(word_tree, i):
 
 
 x = [('S', 'strait'), ('P', 'left'), ('H', 'left'), ('H', 'strait'), ('P', 'left'), ('H', 'strait'), ('H', 'left'), ('H', 'right'), ('P', 'left'), ('P', 'left'), ('H', 'right'), ('P', 'left'), ('H', 'strait'), ('H', 'strait'), ('P', 'left'), ('H', 'strait'), ('H', 'right'), ('P', 'left'), ('P', 'left'), ('H', 'right'), ('P', 'left'), ('H', 'strait'), ('H', 'right'), ('P', 'left'), ('P', 'left'), ('H', 'right'), ('P', 'left'), ('H', 'right'), ('P', 'left'), ('H', 'strait'), ('H', 'strait'), ('P', 'left'), ('H', 'right'), ('P', 'left'), ('H', 'right'), ('H', 'strait'), ('H', 'left'), ('H', 'right'), ('H', 'strait'), ('H', 'right'), ('H', 'right'), ('H', 'left'), ('P', 'strait'), ('P', 'left'), ('P', 'left'), ('H', 'right'), ('H', 'strait'), ('H', 'right'), ('H', None)]
+
+x = [('S', 'strait'), ('P', 'left'), ('H', 'left'), ('H', 'strait'), ('P', 'left'), ('H', 'strait'), ('H', 'left'), ('H', 'right'), ('P', 'left'), ('P', 'left'), ('H', 'right'), ('P', 'left'), ('H', 'strait'), ('H', 'strait'), ('P', 'left'), ('H', 'right'), ('H', 'left'), ('H', 'strait'), ('H', 'right'), ('H', 'right'), ('H', 'left'), ('H', 'strait'), ('H', 'strait'), ('H', 'right'), ('H', 'right'), ('H', 'left'), ('P', 'right'), ('P', 'right'), ('H', 'left'), ('H', 'left'), ('P', 'right'), ('H', 'left'), ('H', 'right'), ('H', 'left'), ('H', 'strait'), ('H', 'strait'), ('H', 'left'), ('H', 'strait'), ('H', 'left'), ('H', None)]
+
+x = [('S', 'strait'), ('P', 'left'), ('H', 'left'), ('P', 'strait'), ('H', 'left'), ('P', 'strait'), ('H', 'left'), ('P', 'strait'), ('P', 'strait'), ('H', 'left'), ('P', 'strait'), ('P', 'strait'), ('H', 'left'), ('P', 'strait'), ('P', 'strait'), ('P', 'strait'), ('H', 'left'), ('P', 'strait'), ('P', 'strait'), ('P', 'strait'), ('H', 'left'), ('P', 'strait'), ('P', 'strait'), ('P', 'strait'), ('P', 'strait'), ('H', 'left'), ('H', 'strait'), ('P', 'strait'), ('P', 'strait'), ('P', 'strait'), ('H', 'left'), ('H', 'strait'), ('H', 'right'), ('H', 'right'), ('P', 'strait'), ('P', 'strait'), ('P', 'strait'), ('P', 'strait'), ('H', 'left'), ('H', 'strait'), ('H', 'strait'), ('H', 'right'), ('P', 'strait'), ('P', 'strait'), ('P', 'strait'), ('P', 'strait'), ('H', 'right'), ('P', 'strait'), ('P', 'strait'), ('P', 'strait'), ('P', 'strait'), ('H', 'right'), ('H', 'strait'), ('H', 'strait'), ('H', 'strait'), ('H', 'right'), ('H', 'left'), ('H', 'strait'), ('H', 'strait'), ('H', 'left'), ('H', 'strait'), ('H', 'left'), ('H', None)]
+
+x = [('S', 'strait'), ('P', 'left'), ('H', 'left'), ('H', 'strait'), ('P', 'left'), ('H', 'right'), ('P', 'left'), ('H', 'left'), ('H', 'strait'), ('P', 'strait'), ('P', 'right'), ('P', 'left'), ('H', 'left'), ('H', 'strait'), ('P', 'strait'), ('P', 'right'), ('P', 'left'), ('H', 'left'), ('H', 'strait'), ('H', 'right'), ('P', 'left'), ('H', 'strait'), ('H', 'right'), ('H', 'right'), ('H', 'left'), ('H', 'strait'), ('H', 'strait'), ('H', 'right'), ('H', 'right'), ('H', 'left'), ('P', 'right'), ('H', 'strait'), ('H', 'strait'), ('H', 'left'), ('P', 'strait'), ('H', 'right'), ('H', 'left'), ('H', 'strait'), ('H', 'strait'), ('H', 'left'), ('H', 'strait'), ('H', 'left'), ('H', None)]
+
 turns = ""
 prev_dir = x[0][1]
 for i in x:
@@ -86,11 +93,17 @@ l = len(turns) // 3
 t1, t2, t3 = turns[:l], turns[l:l*2], turns[l*2:]
 p1, p2, p3 = turns_to_path(t1), turns_to_path(t2), turns_to_path(t3)
 word_tree = rec_tree(10)
-print(traverse_word_tree(word_tree, p1))
-print(traverse_word_tree(word_tree, p2))
-print(traverse_word_tree(word_tree, p3))
 
 print(path_to_turns(index_to_path(extract_words().index("aah"))))
+print(t1)
+print(traverse_word_tree(word_tree, p1))
+print()
 print(path_to_turns(index_to_path(extract_words().index("intrepidity"))))
+print(t2)
+print(traverse_word_tree(word_tree, p2))
+print()
 print(path_to_turns(index_to_path(extract_words().index("zygotene"))))
+print(t3)
+print(traverse_word_tree(word_tree, p3))
+
 print(turns)
