@@ -1,5 +1,5 @@
 # Extract the words from the durchack_word_list.csv into an array
-def extract_words(filepath="durhack_word_list.csv"):
+def extract_words(filepath="data/durhack_word_list.csv"):
     words = []
     with open(filepath) as doc:
         for line in doc.readlines():
