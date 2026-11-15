@@ -1,9 +1,12 @@
 # Extract the words from the durchack_word_list.csv into an array
 def extract_words(filepath="durhack_word_list.csv"):
     words = []
-    with open(filepath) as doc:
-        for line in doc.readlines():
-            words.append(line.replace("\n", ""))
+    try:
+        with open(filepath) as doc:
+            for line in doc.readlines():
+                words.append(line.replace("\n", ""))
+    except FileNotFoundError:
+        print(f"File {filepath} not found. Please ensure the file exists.")
     return words
 
 # Create a ternary tree of depth 10 with the first 30k leafs as words
