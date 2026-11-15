@@ -9,10 +9,11 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).parent
 OUTPUT_DIR = "data"
 
-H_COLOUR = "#c8402f"
-P_COLOUR = "#ffffff"
+H_COLOUR = "#ff0000"
+P_COLOUR = "#000000"
 EDGE = "#000000"
-CHAIN = "#555555"
+START = "#0066ff"
+CHAIN = "#000000"
 BEST = "#c8402f"
 CURRENT = "#9aa0a6"
 TEMP = "#2a6fb0"
@@ -65,7 +66,7 @@ def visualise_sequence(sequence, filename="sequence_visualisation.png", output_d
         prev_x, prev_y = x, y
 
         if node_type == "S":
-            ax.scatter(x, y, NODE_SIZE, marker="^", color=CHAIN, edgecolors=EDGE, zorder=3)
+            ax.scatter(x, y, NODE_SIZE, marker="^", color=START, edgecolors=EDGE, zorder=3)
         elif node_type == "H":
             ax.scatter(x, y, NODE_SIZE, marker="o", color=H_COLOUR, edgecolors=EDGE, zorder=3)
         elif node_type == "P":

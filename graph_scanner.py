@@ -325,11 +325,126 @@ def centre_square(frame, size_ratio=0.6):
 
     return roi, (x0, y0, side)
 
-def video(camera=0, stable_frames=8):
+# --------------------------------------------------------------------------
+# Board detection helpers
+# --------------------------------------------------------------------------
+
+def order_points(pts):
+    pts = np.asarray(pts, dtype=np.float32)
+
+    s = pts.sum(axis=1)
+    diff = np.diff(pts, axis=1)
+
+    tl = pts[np.argmin(s)]
+    br = pts[np.argmax(s)]
+    tr = pts[np.argmin(diff)]
+    bl = pts[np.argmax(diff)]
+
+    return np.array([tl, tr, br, bl], dtype=np.float32)
+
+
+def warp_square(image, pts, size=1000):
+    pts = order_points(pts)
+
+    dst = np.array(
+        [
+            [0, 0],
+            [size - 1, 0],
+            [size - 1, size - 1],
+            [0, size - 1],
+        ],
+        dtype=np.float32,
+    )
+
+    M = cv2.getPerspectiveTransform(pts, dst)
+
+    return cv2.warpPerspective(image, M, (size, size))
+
+
+def find_board(frame):
     """
-    Live camera. Only the central square region is analysed.
-    SPACE accepts a stable reading.
-    q quits.
+    Detect the largest square border in the image.
+
+    Returns:
+        board, corners
+
+    where board is a perspective-corrected image.
+    """
+
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+    blur = cv2.GaussianBlur(gray, (5, 5), 0)
+
+    edges = cv2.Canny(blur, 50, 150)
+
+    contours, _ = cv2.findContours(
+        edges,
+        cv2.RETR_EXTERNAL,
+        cv2.CHAIN_APPROX_SIMPLE,
+    )
+
+    best = None
+    best_area = 0
+
+    h, w = frame.shape[:2]
+    min_area = h * w * 0.05
+
+    for c in contours:
+
+        area = cv2.contourArea(c)
+
+        if area < min_area:
+            continue
+
+        peri = cv2.arcLength(c, True)
+
+        approx = cv2.approxPolyDP(
+            c,
+            0.02 * peri,
+            True,
+        )
+
+        if len(approx) != 4:
+            continue
+
+        x, y, bw, bh = cv2.boundingRect(approx)
+
+        ratio = bw / float(bh)
+
+        if ratio < 0.75 or ratio > 1.33:
+            continue
+
+        if area > best_area:
+            best_area = area
+            best = approx.reshape(4, 2)
+
+    if best is None:
+        return None, None
+
+    board = warp_square(frame, best)
+
+    # Remove border itself
+    margin = int(board.shape[0] * 0.04)
+
+    board = board[
+        margin:-margin,
+        margin:-margin,
+    ]
+
+    return board, best
+
+
+# --------------------------------------------------------------------------
+# Camera mode
+# --------------------------------------------------------------------------
+
+def video(camera=0):
+    """
+    Live preview.
+
+    q      Quit
+    SPACE  Capture and parse
+    r      Retake after capture
     """
 
     vid = cv2.VideoCapture(camera)
@@ -340,92 +455,137 @@ def video(camera=0, stable_frames=8):
     if not vid.isOpened():
         raise RuntimeError("Could not open camera")
 
-    # Let exposure/focus settle
+    # Let exposure settle
     for _ in range(30):
         vid.read()
 
-    last = None
-    count = 0
-    accepted = None
-
     try:
+
         while True:
 
-            ret, frame = vid.read()
-            if not ret:
-                break
+            # --------------------------------------------------------------
+            # Live preview
+            # --------------------------------------------------------------
+            while True:
 
-            roi, (x0, y0, side) = centre_square(frame, 0.6)
+                ret, frame = vid.read()
 
+                if not ret:
+                    return None
+
+                display = frame.copy()
+
+                board, corners = find_board(frame)
+
+                if corners is not None:
+
+                    pts = corners.astype(np.int32)
+
+                    cv2.polylines(
+                        display,
+                        [pts],
+                        True,
+                        (0, 255, 255),
+                        3,
+                    )
+
+                    cv2.putText(
+                        display,
+                        "Board detected - SPACE to capture",
+                        (10, 35),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.8,
+                        (0, 255, 0),
+                        2,
+                    )
+
+                else:
+
+                    cv2.putText(
+                        display,
+                        "Show square board to camera",
+                        (10, 35),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.8,
+                        (0, 0, 255),
+                        2,
+                    )
+
+                cv2.imshow("lattice parser", display)
+
+                key = cv2.waitKey(1) & 0xFF
+
+                if key == ord("q"):
+                    return None
+
+                if key == ord(" ") and board is not None:
+                    captured_board = board.copy()
+                    break
+
+            # --------------------------------------------------------------
+            # Parse captured board
+            # --------------------------------------------------------------
             try:
-                result, nodes, path = parse_frame(roi)
+                result, nodes, path = parse_frame(captured_board)
             except Exception:
-                result, nodes, path = None, [], []
+                result = None
+                nodes = []
+                path = []
 
-            if result and result == last:
-                count += 1
-            else:
-                last = result
-                count = 0
-
-            stable = count >= stable_frames
-
-            # Convert ROI coordinates back into full-frame coordinates
-            display_nodes = []
-
-            for n in nodes:
-                nn = n.copy()
-                nn["x"] += x0
-                nn["y"] += y0
-                display_nodes.append(nn)
-
-            disp = draw_overlay(frame, display_nodes, path, result)
-
-            # Dim everything outside the scan region
-            overlay = disp.copy()
-
-            overlay[:y0, :] = (40, 40, 40)
-            overlay[y0 + side:, :] = (40, 40, 40)
-            overlay[y0:y0 + side, :x0] = (40, 40, 40)
-            overlay[y0:y0 + side, x0 + side:] = (40, 40, 40)
-
-            disp = cv2.addWeighted(overlay, 0.5, disp, 0.5, 0)
-
-            # Draw scan box
-            cv2.rectangle(
-                disp,
-                (x0, y0),
-                (x0 + side, y0 + side),
-                (255, 255, 0),
-                2,
+            parsed = draw_overlay(
+                captured_board,
+                nodes,
+                path,
+                result,
             )
 
-            cv2.putText(
-                disp,
-                "STABLE - SPACE to accept" if stable else "Place diagram inside square",
-                (10, disp.shape[0] - 15),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.6,
-                (0, 200, 0) if stable else (0, 0, 255),
-                2,
-            )
+            while True:
 
-            cv2.imshow("lattice parser", disp)
+                display = parsed.copy()
 
-            key = cv2.waitKey(1) & 0xFF
+                if result is not None:
+                    txt = str(result)
+                    colour = (0, 255, 0)
+                else:
+                    txt = "No valid chain detected"
+                    colour = (0, 0, 255)
 
-            if key == ord("q"):
-                break
+                cv2.putText(
+                    display,
+                    txt[:120],
+                    (10, 35),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.7,
+                    colour,
+                    2,
+                )
 
-            if key == ord(" ") and stable:
-                accepted = last
-                break
+                cv2.putText(
+                    display,
+                    "SPACE=accept   r=retake   q=quit",
+                    (10, display.shape[0] - 20),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.7,
+                    (0, 255, 255),
+                    2,
+                )
+
+                cv2.imshow("lattice parser", display)
+
+                key = cv2.waitKey(1) & 0xFF
+
+                if key == ord("q"):
+                    return None
+
+                if key == ord("r"):
+                    break
+
+                if key == ord(" "):
+                    return result
 
     finally:
         vid.release()
         cv2.destroyAllWindows()
-
-    return accepted
 
 if __name__ == "__main__":
     args = sys.argv[1:]
