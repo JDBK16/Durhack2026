@@ -67,30 +67,3 @@ def traverse_word_tree(word_tree, i):
     for index in i:
         word_tree = word_tree[int(index)]
     return word_tree
-
-
-x = [('S', 'strait'), ('P', 'left'), ('H', 'left'), ('H', 'strait'), ('P', 'left'), ('H', 'strait'), ('H', 'left'), ('H', 'right'), ('P', 'left'), ('P', 'left'), ('H', 'right'), ('P', 'left'), ('H', 'strait'), ('H', 'strait'), ('P', 'left'), ('H', 'strait'), ('H', 'right'), ('P', 'left'), ('P', 'left'), ('H', 'right'), ('P', 'left'), ('H', 'strait'), ('H', 'right'), ('P', 'left'), ('P', 'left'), ('H', 'right'), ('P', 'left'), ('H', 'right'), ('P', 'left'), ('H', 'strait'), ('H', 'strait'), ('P', 'left'), ('H', 'right'), ('P', 'left'), ('H', 'right'), ('H', 'strait'), ('H', 'left'), ('H', 'right'), ('H', 'strait'), ('H', 'right'), ('H', 'right'), ('H', 'left'), ('P', 'strait'), ('P', 'left'), ('P', 'left'), ('H', 'right'), ('H', 'strait'), ('H', 'right'), ('H', None)]
-turns = ""
-prev_dir = x[0][1]
-for i in x:
-    if i[0] == "H":
-        if prev_dir == "left":
-            turns += "L"
-        elif prev_dir == "right":
-            turns += "R"
-        else:
-            turns += "F"
-    prev_dir = i[1]
-    
-l = len(turns) // 3
-t1, t2, t3 = turns[:l], turns[l:l*2], turns[l*2:]
-p1, p2, p3 = turns_to_path(t1), turns_to_path(t2), turns_to_path(t3)
-word_tree = rec_tree(10)
-print(traverse_word_tree(word_tree, p1))
-print(traverse_word_tree(word_tree, p2))
-print(traverse_word_tree(word_tree, p3))
-
-print(path_to_turns(index_to_path(extract_words().index("aah"))))
-print(path_to_turns(index_to_path(extract_words().index("intrepidity"))))
-print(path_to_turns(index_to_path(extract_words().index("zygotene"))))
-print(turns)
