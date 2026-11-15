@@ -56,4 +56,4 @@ def test_suite():
         print("Test", i + 1, "Passed!")
         
     
-#test_suite()
+test_suite()

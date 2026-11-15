@@ -66,4 +66,4 @@ def turns_to_path(turns):
 def traverse_word_tree(word_tree, i):
     for index in i:
         word_tree = word_tree[int(index)]
-    return word_tree
+    return word_tree[0]
