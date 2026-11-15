@@ -309,48 +309,129 @@ def image(source=None, show=False):
         cv2.destroyAllWindows()
     return result
 
+def centre_square(frame, size_ratio=0.6):
+    """
+    Return a centred square ROI and its coordinates.
+    size_ratio=0.6 means the square occupies 60% of the smaller frame dimension.
+    """
+    h, w = frame.shape[:2]
+
+    side = int(min(h, w) * size_ratio)
+
+    x0 = (w - side) // 2
+    y0 = (h - side) // 2
+
+    roi = frame[y0:y0 + side, x0:x0 + side]
+
+    return roi, (x0, y0, side)
 
 def video(camera=0, stable_frames=8):
-    """Live camera. A reading is shown once it has been identical for
-    `stable_frames` frames in a row. SPACE accepts it, q quits."""
+    """
+    Live camera. Only the central square region is analysed.
+    SPACE accepts a stable reading.
+    q quits.
+    """
+
     vid = cv2.VideoCapture(camera)
+
+    vid.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
+    vid.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
+
     if not vid.isOpened():
         raise RuntimeError("Could not open camera")
-    last, count, accepted = None, 0, None
+
+    # Let exposure/focus settle
+    for _ in range(30):
+        vid.read()
+
+    last = None
+    count = 0
+    accepted = None
+
     try:
         while True:
+
             ret, frame = vid.read()
             if not ret:
                 break
+
+            roi, (x0, y0, side) = centre_square(frame, 0.6)
+
             try:
-                result, nodes, path = parse_frame(frame)
-            except Exception:                               # bad frame - skip it
+                result, nodes, path = parse_frame(roi)
+            except Exception:
                 result, nodes, path = None, [], []
+
             if result and result == last:
                 count += 1
             else:
-                last, count = result, 0
+                last = result
+                count = 0
+
             stable = count >= stable_frames
-            disp = draw_overlay(frame, nodes, path, result)
-            cv2.putText(disp, "STABLE - SPACE to accept" if stable else "searching...",
-                        (10, disp.shape[0] - 15), cv2.FONT_HERSHEY_SIMPLEX, 0.6,
-                        (0, 200, 0) if stable else (0, 0, 255), 2)
+
+            # Convert ROI coordinates back into full-frame coordinates
+            display_nodes = []
+
+            for n in nodes:
+                nn = n.copy()
+                nn["x"] += x0
+                nn["y"] += y0
+                display_nodes.append(nn)
+
+            disp = draw_overlay(frame, display_nodes, path, result)
+
+            # Dim everything outside the scan region
+            overlay = disp.copy()
+
+            overlay[:y0, :] = (40, 40, 40)
+            overlay[y0 + side:, :] = (40, 40, 40)
+            overlay[y0:y0 + side, :x0] = (40, 40, 40)
+            overlay[y0:y0 + side, x0 + side:] = (40, 40, 40)
+
+            disp = cv2.addWeighted(overlay, 0.5, disp, 0.5, 0)
+
+            # Draw scan box
+            cv2.rectangle(
+                disp,
+                (x0, y0),
+                (x0 + side, y0 + side),
+                (255, 255, 0),
+                2,
+            )
+
+            cv2.putText(
+                disp,
+                "STABLE - SPACE to accept" if stable else "Place diagram inside square",
+                (10, disp.shape[0] - 15),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                (0, 200, 0) if stable else (0, 0, 255),
+                2,
+            )
+
             cv2.imshow("lattice parser", disp)
+
             key = cv2.waitKey(1) & 0xFF
+
             if key == ord("q"):
                 break
+
             if key == ord(" ") and stable:
                 accepted = last
                 break
+
     finally:
         vid.release()
         cv2.destroyAllWindows()
-    return accepted
 
+    return accepted
 
 if __name__ == "__main__":
     args = sys.argv[1:]
     if not args or args[0] == "--video":
+        # 0 = default
+        # 2 = Virtual Camera (OBS)
         print(video())
     elif args[0] == "--snapshot":
         print(image(None, show=True))
