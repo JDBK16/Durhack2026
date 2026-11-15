@@ -44,6 +44,7 @@ if __name__ == "__main__":
     file_path = "proteins/" + args.word1 + "_" + args.word2 + "_" + args.word3 + ".png"
 
     result = image(file_path)
+
     turns = ""
     for i in result:
         if i[1] == "H":
@@ -56,8 +57,10 @@ if __name__ == "__main__":
         
     l = len(turns) // 3
     t1, t2, t3 = turns[:l], turns[l:l*2], turns[l*2:]
+
     p1, p2, p3 = turns_to_path(t1), turns_to_path(t2), turns_to_path(t3)
     word_tree = rec_tree(10)
-    print(traverse_word_tree(word_tree, p1))
-    print(traverse_word_tree(word_tree, p2))
-    print(traverse_word_tree(word_tree, p3))
+
+    print("\nDECODED RESULTS")
+    print(f"Decoded Turns 1: {t1}\t Decoded Turns 2: {t2}\t Decoded Turns 3: {t3}")
+    print(f"Dcoded Word 1: {traverse_word_tree(word_tree, p1)}\t Decoded Word 2: {traverse_word_tree(word_tree, p2)}\t Decoded Word 3: {traverse_word_tree(word_tree, p3)}")
