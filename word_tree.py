@@ -7,17 +7,19 @@ def extract_words(filepath="durhack_word_list.csv"):
     return words
 
 # Create a ternary tree of depth 10 with the first 30k leafs as words
-word_exhaust = extract_words()
-def rec_tree(depth):
+def rec_tree(depth, words=extract_words(), index=0):
     if depth == 0:
-        global word_exhaust
-        if len(word_exhaust) > 0:
-            word = word_exhaust[0]
-            word_exhaust = word_exhaust[1:]
-            return [word]
+        if index < len(words):
+            return [words[index]]
         return []
-    return [rec_tree(depth-1), rec_tree(depth-1), rec_tree(depth-1)]
-word_tree = rec_tree(10)
+
+    size = 3 ** (depth - 1)
+
+    return [
+        rec_tree(depth - 1, words, index),
+        rec_tree(depth - 1, words, index + size),
+        rec_tree(depth - 1, words, index + 2 * size)
+    ]
 
 # Conversts index in words array to path in word tree
 def index_to_path(index, depth=10):
