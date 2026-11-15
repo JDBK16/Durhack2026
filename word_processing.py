@@ -31,9 +31,6 @@ for i in words:
         alphabet[i[0]] = 1
         
 alphabet = dict(sorted(alphabet.items(), key=lambda item: item[1], reverse=True))
-#print(alphabet)
-
-
 
 words_list = words.copy()
 def rec_tree(depth):

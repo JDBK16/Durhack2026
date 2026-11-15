@@ -66,11 +66,11 @@ def visualise_sequence(sequence, filename="sequence_visualisation.png", output_d
         prev_x, prev_y = x, y
 
         if node_type == "S":
-            ax.scatter(x, y, NODE_SIZE, marker="^", color=START, edgecolors=EDGE, zorder=3)
+            ax.scatter(x, y, NODE_SIZE, marker="^", color=START, edgecolors=START, zorder=3)
         elif node_type == "H":
-            ax.scatter(x, y, NODE_SIZE, marker="o", color=H_COLOUR, edgecolors=EDGE, zorder=3)
+            ax.scatter(x, y, NODE_SIZE, marker="o", color=H_COLOUR, edgecolors=H_COLOUR, zorder=3)
         elif node_type == "P":
-            ax.scatter(x, y, NODE_SIZE, marker="s", color=P_COLOUR, edgecolors=EDGE, zorder=3)
+            ax.scatter(x, y, NODE_SIZE, marker="s", color=P_COLOUR, edgecolors=P_COLOUR, zorder=3)
         else:
             raise ValueError(f"Unknown node type: {node_type}")
     

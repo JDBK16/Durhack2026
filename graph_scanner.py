@@ -1,333 +1,27 @@
-"""
-Parse 2D lattice protein diagrams (HP model) from images or a live camera.
-
-Conventions:
-    grey triangle -> 'S' (start)
-    red circle    -> 'H'
-    white square  -> 'P'
-Shapes are joined by grey lines. Starting at the triangle, the chain is walked
-shape by shape. Each entry in the output is (state, direction of the move OUT
-of that shape): 'strait', 'left' or 'right'. The first move counts as 'strait'.
-The last shape has no outgoing move, so its direction is None.
-
-Usage:
-    python lattice_parser.py image.png        # parse a still image file
-    python lattice_parser.py --snapshot       # grab one camera frame and parse it
-    python lattice_parser.py --video          # live camera; SPACE = accept, q = quit
-"""
-import sys
-import math
 import cv2
+import math
+import sys
 import numpy as np
 
+# Overlay colours (BGR), used for drawing only, never for detection
+COLOURS = {
+    "S": (255, 0, 0),
+    "H": (0, 0, 255),
+    "P": (0, 255, 0),
+}
 
-# --------------------------------------------------------------------------
-# 1. Shape detection
-# --------------------------------------------------------------------------
-def _ink_mask(gray):
-    """Binary mask of 'dark' pixels (outlines, connecting lines, triangle).
-    The local paper brightness is estimated with a large max-filter and each
-    pixel is compared to it, so shadows / uneven lighting in photos don't
-    matter and filled shapes (the triangle) stay solid."""
-    k = max(15, min(gray.shape) // 12) | 1
-    bg = cv2.dilate(gray, cv2.getStructuringElement(cv2.MORPH_RECT, (k, k)))
-    bg = cv2.GaussianBlur(bg, (k, k), 0).astype(np.float32) + 1
-    norm = gray.astype(np.float32) / bg
-    return ((norm < 0.78) * 255).astype(np.uint8)
+RAW_MODE = "--raw" in sys.argv     # skip board-outline detection
+RAW_MODE = True
 
-
-def _find_circles(hsv):
-    """Red filled circles -> list of (cx, cy, radius)."""
-    low = cv2.inRange(hsv, (0, 70, 50), (12, 255, 255))
-    high = cv2.inRange(hsv, (165, 70, 50), (180, 255, 255))
-    red = cv2.morphologyEx(low | high, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
-    contours, _ = cv2.findContours(red, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    out = []
-    for c in contours:
-        area = cv2.contourArea(c)
-        if area < 20:
-            continue
-        (x, y), r = cv2.minEnclosingCircle(c)
-        if area / (math.pi * r * r) > 0.6:                 # reasonably round
-            m = cv2.moments(c)
-            out.append((m["m10"] / m["m00"], m["m01"] / m["m00"], r))
-    # discard outliers in size (stray red objects in a photo)
-    if out:
-        med = np.median([o[2] for o in out])
-        out = [o for o in out if 0.5 * med < o[2] < 2.0 * med]
-    return out
+TARGET_SIZE = 1600      # board is rescaled so its longest side is this
+COARSE_THRESH = 20      # pass-1 darkness threshold
+CORE_MIN = 12           # minimum node contrast in refine_blob
+LINE_THRESH = 8         # connector line darkness threshold
 
 
-def _find_squares(ink, ref_area):
-    """White squares = enclosed light regions (holes in the ink mask) that are
-    roughly square and roughly the same size as the circles."""
-    contours, hier = cv2.findContours(ink, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
-    out = []
-    if hier is None:
-        return out
-    for c, h in zip(contours, hier[0]):
-        if h[3] < 0:                                       # want holes only
-            continue
-        area = cv2.contourArea(c)
-        if ref_area and not (0.3 * ref_area < area < 3.0 * ref_area):
-            continue
-        if not ref_area and area < 50:
-            continue
-        peri = cv2.arcLength(c, True)
-        approx = cv2.approxPolyDP(c, 0.06 * peri, True)
-        rect = cv2.minAreaRect(c)
-        w, hgt = rect[1]
-        if len(approx) == 4 and w > 0 and hgt > 0 and 0.6 < w / hgt < 1.67 \
-                and area / (w * hgt) > 0.75:
-            m = cv2.moments(c)
-            out.append((m["m10"] / m["m00"], m["m01"] / m["m00"], math.sqrt(area) / 2))
-    if out and not ref_area:                               # no circles to compare to
-        med = np.median([o[2] for o in out])
-        out = [o for o in out if 0.6 * med < o[2] < 1.6 * med]
-    return out
-
-
-def _triangle_candidates(ink, sat, ref_r):
-    """Solid dark-grey blobs that could be the start triangle.
-    Red pixels are removed, then an opening sized to the shapes strips away
-    lines, outlines and text strokes; only solid filled areas survive. The
-    final choice (in build_graph) is the candidate bonded to a chain end, so
-    stray dark blobs elsewhere in the photo are ignored."""
-    grey = cv2.bitwise_and(ink, (sat < 90).astype(np.uint8) * 255)
-    k = max(3, int(ref_r * 0.8)) if ref_r else 7
-    solid = cv2.morphologyEx(grey, cv2.MORPH_OPEN,
-                             cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k)))
-    contours, _ = cv2.findContours(solid, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    out = []
-    for c in contours:
-        area = cv2.contourArea(c)
-        if area < 15 or (ref_r and not (0.4 * ref_r ** 2 < area < 10 * ref_r ** 2)):
-            continue
-        tri_area, _ = cv2.minEnclosingTriangle(c)
-        _, (w, h), _ = cv2.minAreaRect(c)
-        # triangle: fill_tri high, fill_rect ~0.5-0.7; circle 0.6/0.79; square 0.5/1
-        score = area / max(tri_area, 1) - area / max(w * h, 1)
-        m = cv2.moments(c)
-        out.append(dict(type="S", x=m["m10"] / m["m00"], y=m["m01"] / m["m00"],
-                        r=math.sqrt(area) * 0.75, score=score))
-    return out
-
-
-def detect_shapes(bgr):
-    """Return (nodes, triangle_candidates, ink_mask). Nodes are dicts with
-    type 'H' or 'P', centre x, y and approximate radius r."""
-    gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
-    hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
-    ink = _ink_mask(gray)
-
-    circles = _find_circles(hsv)
-    ref_r = float(np.median([c[2] for c in circles])) if circles else None
-    ref_area = (2 * ref_r) ** 2 if ref_r else None         # square ~ same width
-
-    squares = _find_squares(ink, ref_area)
-    if ref_r is None and squares:
-        ref_r = float(np.median([s[2] for s in squares]))
-
-    nodes = [dict(type="H", x=x, y=y, r=r) for x, y, r in circles]
-    nodes += [dict(type="P", x=x, y=y, r=r) for x, y, r in squares]
-    tris = _triangle_candidates(ink, hsv[..., 1], ref_r)
-    return nodes, tris, ink
-
-
-# --------------------------------------------------------------------------
-# 2. Bond detection (is there a line between two neighbouring shapes?)
-# --------------------------------------------------------------------------
-def _bonded(ink, a, b, min_fill=0.7):
-    """Sample the ink mask along the gap between two shapes' edges."""
-    ax, ay, bx, by = a["x"], a["y"], b["x"], b["y"]
-    d = math.hypot(bx - ax, by - ay)
-    t0 = (a["r"] * 1.15) / d                                # start just past shape a
-    t1 = 1 - (b["r"] * 1.15) / d                            # stop just before shape b
-    if t1 - t0 < 0.05:                                      # shapes nearly touching
-        t0, t1 = 0.45, 0.55
-    n = 15
-    hits = 0
-    tol = max(2, int(0.3 * min(a["r"], b["r"])))
-    h, w = ink.shape
-    for t in np.linspace(t0, t1, n):
-        x, y = ax + t * (bx - ax), ay + t * (by - ay)
-        xi, yi = int(round(x)), int(round(y))
-        # look in a tiny perpendicular window to tolerate slight misalignment
-        px, py = -(by - ay) / d, (bx - ax) / d
-        found = False
-        for s in range(-tol, tol + 1):
-            xx, yy = int(round(x + s * px)), int(round(y + s * py))
-            if 0 <= xx < w and 0 <= yy < h and ink[yy, xx]:
-                found = True
-                break
-        hits += found
-    return hits / n >= min_fill
-
-
-def build_graph(nodes, tris, ink):
-    """Bond neighbouring H/P nodes, then attach the start triangle.
-    Returns (nodes_with_S, adjacency, lattice_spacing)."""
-    if len(nodes) < 1:
-        return nodes, {}, None
-    pts = np.array([[n["x"], n["y"]] for n in nodes])
-    if len(nodes) > 1:
-        dists = np.linalg.norm(pts[:, None] - pts[None], axis=2)
-        np.fill_diagonal(dists, np.inf)
-        nn = dists.min(axis=1)                              # local step size per node
-        spacing = float(np.median(nn))                      # (varies under perspective)
-    else:
-        dists, spacing = np.zeros((1, 1)), 3 * nodes[0]["r"]
-        nn = np.array([spacing])
-    adj = {i: [] for i in range(len(nodes))}
-    for i in range(len(nodes)):
-        for j in range(i + 1, len(nodes)):
-            # direct lattice neighbours only; diagonals (~1.41x) are also
-            # rejected by the bond check because their midpoint is blank paper
-            if dists[i, j] < 1.3 * max(nn[i], nn[j]) and _bonded(ink, nodes[i], nodes[j]):
-                adj[i].append(j)
-                adj[j].append(i)
-
-    # The start triangle must be bonded to a chain end (a node with <= 1 bond).
-    best = None
-    for t in tris:
-        for i, n in enumerate(nodes):
-            if len(adj[i]) > 1:
-                continue
-            d = math.hypot(t["x"] - n["x"], t["y"] - n["y"])
-            if 0.6 * nn[i] < d < 1.5 * nn[i] and _bonded(ink, t, n):
-                if best is None or t["score"] > best[0]["score"]:
-                    best = (t, i)
-    if best is None:
-        return nodes, adj, spacing
-    s_idx = len(nodes)
-    nodes = nodes + [best[0]]
-    adj[s_idx] = [best[1]]
-    adj[best[1]].append(s_idx)
-    return nodes, adj, spacing
-
-
-# --------------------------------------------------------------------------
-# 3. Walk the chain and classify turns
-# --------------------------------------------------------------------------
-def _turn(v_prev, v_next):
-    """Image coords (y down): negative cross product = left turn."""
-    cross = v_prev[0] * v_next[1] - v_prev[1] * v_next[0]
-    dot = v_prev[0] * v_next[0] + v_prev[1] * v_next[1]
-    ang = math.degrees(math.atan2(cross, dot))
-    if abs(ang) < 45:
-        return "strait"
-    if abs(ang) > 135:
-        return "back"                                       # shouldn't happen on a valid chain
-    return "right" if ang > 0 else "left"
-
-
-def walk_chain(nodes, adj):
-    start = next((i for i, n in enumerate(nodes) if n["type"] == "S"), None)
-    if start is None:
-        return None, []
-    path, visited = [start], {start}
-    cur = start
-    while True:
-        nxt = [j for j in adj[cur] if j not in visited]
-        if not nxt:
-            break
-        if len(nxt) > 1 and len(path) >= 2:
-            # ambiguous branch: prefer the neighbour not adjacent to earlier path
-            nxt.sort(key=lambda j: len(adj[j]))
-        cur = nxt[0]
-        path.append(cur)
-        visited.add(cur)
-
-    result = []
-    prev_vec = None
-    for k, idx in enumerate(path):
-        if k == len(path) - 1:
-            result.append((nodes[idx]["type"], None))       # end of chain
-            break
-        nxt = nodes[path[k + 1]]
-        vec = (nxt["x"] - nodes[idx]["x"], nxt["y"] - nodes[idx]["y"])
-        direction = "strait" if prev_vec is None else _turn(prev_vec, vec)
-        result.append((nodes[idx]["type"], direction))
-        prev_vec = vec
-    return result, path
-
-
-def parse_frame(bgr):
-    """Full pipeline on one BGR image. Returns (result, nodes, path)."""
-    nodes, tris, ink = detect_shapes(bgr)
-    nodes, adj, _ = build_graph(nodes, tris, ink)
-    if not adj:
-        return None, nodes, []
-    result, path = walk_chain(nodes, adj)
-    return result, nodes, path
-
-
-# --------------------------------------------------------------------------
-# 4. Visualisation + entry points
-# --------------------------------------------------------------------------
-COLOURS = {"S": (0, 200, 0), "H": (255, 0, 0), "P": (0, 165, 255)}
-
-
-def draw_overlay(bgr, nodes, path, result):
-    out = bgr.copy()
-    for k in range(len(path) - 1):
-        a, b = nodes[path[k]], nodes[path[k + 1]]
-        cv2.line(out, (int(a["x"]), int(a["y"])), (int(b["x"]), int(b["y"])), (0, 255, 0), 2)
-    for n in nodes:
-        cv2.circle(out, (int(n["x"]), int(n["y"])), int(n["r"]) + 3, COLOURS[n["type"]], 2)
-    if result:
-        for k, idx in enumerate(path):
-            n = nodes[idx]
-            cv2.putText(out, str(k), (int(n["x"]) - 6, int(n["y"]) - int(n["r"]) - 6),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 255), 1)
-        txt = "".join(s for s, _ in result)
-        cv2.putText(out, f"{len(result)} shapes: {txt}", (10, 25),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
-    return out
-
-
-def image(source=None, show=False):
-    """Parse a still image. `source` may be a file path, a BGR array, or None
-    to grab a single frame from the default camera."""
-    if source is None:
-        cap = cv2.VideoCapture(0)
-        for _ in range(5):                                  # let auto-exposure settle
-            ret, frame = cap.read()
-        cap.release()
-        if not ret:
-            raise RuntimeError("Could not read from camera")
-    elif isinstance(source, str):
-        frame = cv2.imread(source)
-        if frame is None:
-            raise FileNotFoundError(source)
-    else:
-        frame = source
-    result, nodes, path = parse_frame(frame)
-    if show:
-        cv2.imshow("parsed", draw_overlay(frame, nodes, path, result))
-        cv2.waitKey(0)
-        cv2.destroyAllWindows()
-    return result
-
-def centre_square(frame, size_ratio=0.6):
-    """
-    Return a centred square ROI and its coordinates.
-    size_ratio=0.6 means the square occupies 60% of the smaller frame dimension.
-    """
-    h, w = frame.shape[:2]
-
-    side = int(min(h, w) * size_ratio)
-
-    x0 = (w - side) // 2
-    y0 = (h - side) // 2
-
-    roi = frame[y0:y0 + side, x0:x0 + side]
-
-    return roi, (x0, y0, side)
-
-# --------------------------------------------------------------------------
-# Board detection helpers
-# --------------------------------------------------------------------------
+# ----------------------------------------------------------------------
+# Board detection / perspective correction (optional)
+# ----------------------------------------------------------------------
 
 def order_points(pts):
     pts = np.asarray(pts, dtype=np.float32)
@@ -356,62 +50,37 @@ def warp_square(image, pts, size=1000):
         dtype=np.float32,
     )
 
-    M = cv2.getPerspectiveTransform(pts, dst)
-
-    return cv2.warpPerspective(image, M, (size, size))
+    matrix = cv2.getPerspectiveTransform(pts, dst)
+    return cv2.warpPerspective(image, matrix, (size, size))
 
 
 def find_board(frame):
-    """
-    Detect the largest square border in the image.
-
-    Returns:
-        board, corners
-
-    where board is a perspective-corrected image.
-    """
-
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-
     blur = cv2.GaussianBlur(gray, (5, 5), 0)
-
     edges = cv2.Canny(blur, 50, 150)
 
     contours, _ = cv2.findContours(
-        edges,
-        cv2.RETR_EXTERNAL,
-        cv2.CHAIN_APPROX_SIMPLE,
+        edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
     )
 
     best = None
     best_area = 0
 
-    h, w = frame.shape[:2]
-    min_area = h * w * 0.05
-
     for c in contours:
-
         area = cv2.contourArea(c)
-
-        if area < min_area:
+        if area < 10000:
             continue
 
         peri = cv2.arcLength(c, True)
-
-        approx = cv2.approxPolyDP(
-            c,
-            0.02 * peri,
-            True,
-        )
+        approx = cv2.approxPolyDP(c, 0.02 * peri, True)
 
         if len(approx) != 4:
             continue
 
-        x, y, bw, bh = cv2.boundingRect(approx)
+        _, _, w, h = cv2.boundingRect(approx)
+        ratio = w / float(h)
 
-        ratio = bw / float(bh)
-
-        if ratio < 0.75 or ratio > 1.33:
+        if not (0.8 <= ratio <= 1.2):
             continue
 
         if area > best_area:
@@ -423,177 +92,823 @@ def find_board(frame):
 
     board = warp_square(frame, best)
 
-    # Remove border itself
     margin = int(board.shape[0] * 0.04)
-
-    board = board[
-        margin:-margin,
-        margin:-margin,
-    ]
+    board = board[margin:-margin, margin:-margin]
 
     return board, best
 
 
-# --------------------------------------------------------------------------
-# Camera mode
-# --------------------------------------------------------------------------
+def normalise(board, target=TARGET_SIZE):
+    """Rescale so nodes are big enough for reliable shape measurement."""
+    h, w = board.shape[:2]
+    s = target / float(max(h, w))
 
-def video(camera=0):
+    if abs(s - 1.0) < 0.05:
+        return board
+
+    interp = cv2.INTER_CUBIC if s > 1 else cv2.INTER_AREA
+    return cv2.resize(board, None, fx=s, fy=s, interpolation=interp)
+
+
+# ----------------------------------------------------------------------
+# Shape detection (no colour, only "darker than the local page")
+# ----------------------------------------------------------------------
+
+def _ellipse(k):
+    return cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))
+
+
+def darkness(board, blur=7):
     """
-    Live preview.
-
-    q      Quit
-    SPACE  Capture and parse
-    r      Retake after capture
+    How much darker each pixel is than the page around it (0 = paper).
+    The page brightness is estimated locally with a large closing, so
+    shading / vignetting is removed.
     """
+    gray = cv2.cvtColor(board, cv2.COLOR_BGR2GRAY)
 
-    vid = cv2.VideoCapture(camera)
+    if blur > 1:
+        gray = cv2.GaussianBlur(gray, (blur, blur), 0)
 
-    vid.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
-    vid.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
+    # kernel must be larger than a node, smaller than the shading gradient
+    k = int(min(board.shape[:2]) * 0.08) | 1
+    bg = cv2.morphologyEx(gray, cv2.MORPH_CLOSE, _ellipse(k))
 
-    if not vid.isOpened():
-        raise RuntimeError("Could not open camera")
+    return cv2.subtract(bg, gray)
 
-    # Let exposure settle
-    for _ in range(30):
-        vid.read()
+
+def line_kernel(board):
+    """Wider than a connector line, much smaller than a node."""
+    return _ellipse(max(7, int(max(board.shape[:2]) * 0.010)) | 1)
+
+
+def refine_blob(diff, cx, cy, r, kernel):
+    """
+    Re-threshold one node at half of its own contrast (half-max sits on
+    the true edge of a blurred shape), remove connector stubs, and
+    return the contour of the blob containing the node centre.
+    """
+    H, W = diff.shape
+
+    half = int(r * 1.8) + 2
+    x0, x1 = max(0, int(cx) - half), min(W, int(cx) + half + 1)
+    y0, y1 = max(0, int(cy) - half), min(H, int(cy) + half + 1)
+
+    roi = diff[y0:y1, x0:x1]
+    if roi.size == 0:
+        return None
+
+    yy, xx = np.ogrid[y0:y1, x0:x1]
+    core_px = roi[(xx - cx) ** 2 + (yy - cy) ** 2 <= (0.5 * r) ** 2]
+
+    if core_px.size == 0:
+        return None
+
+    core = float(np.median(core_px))
+    if core < CORE_MIN:
+        return None
+
+    mask = (roi > core * 0.5).astype(np.uint8) * 255
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+
+    n, labels = cv2.connectedComponents(mask)
+    if n < 2:
+        return None
+
+    lx = min(max(int(round(cx)) - x0, 0), labels.shape[1] - 1)
+    ly = min(max(int(round(cy)) - y0, 0), labels.shape[0] - 1)
+    lab = labels[ly, lx]
+
+    if lab == 0:
+        lab = int(np.argmax(np.bincount(labels.ravel())[1:])) + 1
+
+    comp = (labels == lab).astype(np.uint8)
+
+    cnts, _ = cv2.findContours(
+        comp, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE
+    )
+    if not cnts:
+        return None
+
+    c = max(cnts, key=cv2.contourArea)
+    return c + np.array([x0, y0], dtype=c.dtype)
+
+
+def shape_metrics(c):
+    """
+    Two rotation- and blur-tolerant shape measures:
+
+      fill = area / area of minimum enclosing circle
+             circle ~0.9-1.0, square ~0.64-0.75, triangle ~0.41-0.55
+
+      tri  = area / area of minimum enclosing triangle
+             triangle ~0.8-1.0, circle ~0.6, square ~0.5
+
+    A triangle is the shape with high tri AND low fill.
+    """
+    area = cv2.contourArea(c)
+    (_, _), rad = cv2.minEnclosingCircle(c)
+
+    if rad < 1 or area < 1:
+        return None
+
+    fill = area / (math.pi * rad * rad)
 
     try:
+        tri_area, _ = cv2.minEnclosingTriangle(c.astype(np.float32))
+        tri = area / tri_area if tri_area > 0 else 0.0
+    except cv2.error:
+        tri = 0.0
 
-        while True:
+    return fill, min(tri, 1.2)
 
-            # --------------------------------------------------------------
-            # Live preview
-            # --------------------------------------------------------------
-            while True:
 
-                ret, frame = vid.read()
+def detect_shapes(board, debug=False):
+    diff = darkness(board)
+    h, w = diff.shape
 
-                if not ret:
-                    return None
+    # must be wider than the connector lines so they are removed
+    kernel = line_kernel(board)
 
-                display = frame.copy()
+    # ---- pass 1: coarse blobs --------------------------------------
+    coarse = (diff > COARSE_THRESH).astype(np.uint8) * 255
+    coarse = cv2.morphologyEx(coarse, cv2.MORPH_OPEN, kernel)
 
-                board, corners = find_board(frame)
+    if debug:
+        cv2.imwrite("debug_board.png", board)
+        cv2.imwrite(
+            "debug_darkness.png",
+            cv2.normalize(diff, None, 0, 255, cv2.NORM_MINMAX),
+        )
+        cv2.imwrite("debug_coarse.png", coarse)
 
-                if corners is not None:
+    contours, _ = cv2.findContours(
+        coarse, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+    )
 
-                    pts = corners.astype(np.int32)
+    min_area = 0.00010 * h * w
 
-                    cv2.polylines(
-                        display,
-                        [pts],
-                        True,
-                        (0, 255, 255),
-                        3,
-                    )
+    blobs = []
+    for c in contours:
+        a = cv2.contourArea(c)
+        if a < min_area:
+            continue
 
-                    cv2.putText(
-                        display,
-                        "Board detected - SPACE to capture",
-                        (10, 35),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.8,
-                        (0, 255, 0),
-                        2,
-                    )
+        x, y, bw, bh = cv2.boundingRect(c)
+        if x <= 1 or y <= 1 or x + bw >= w - 1 or y + bh >= h - 1:
+            continue                      # touches the border -> not a node
 
-                else:
+        blobs.append((a, c))
 
-                    cv2.putText(
-                        display,
-                        "Show square board to camera",
-                        (10, 35),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.8,
-                        (0, 0, 255),
-                        2,
-                    )
+    if debug:
+        print(
+            f"board {w}x{h}, kernel {kernel.shape[0]}px, "
+            f"coarse blobs: {len(blobs)} "
+            f"(contours before filtering: {len(contours)}), "
+            f"max darkness: {diff.max()}"
+        )
 
-                cv2.imshow("lattice parser", display)
+    if not blobs:
+        return []
 
-                key = cv2.waitKey(1) & 0xFF
+    med = float(np.median([a for a, _ in blobs]))
 
-                if key == ord("q"):
-                    return None
+    # ---- pass 2: refine each node and measure its shape ------------
+    nodes = []
 
-                if key == ord(" ") and board is not None:
-                    captured_board = board.copy()
-                    break
+    for a, c in blobs:
+        # triangle is smaller than the others, so keep the lower bound loose
+        if a < 0.15 * med or a > 2.5 * med:
+            if debug:
+                print(f"skipped blob area={a:.0f} (median {med:.0f})")
+            continue
 
-            # --------------------------------------------------------------
-            # Parse captured board
-            # --------------------------------------------------------------
-            try:
-                result, nodes, path = parse_frame(captured_board)
-            except Exception:
-                result = None
-                nodes = []
-                path = []
+        m = cv2.moments(c)
+        if m["m00"] == 0:
+            continue
 
-            parsed = draw_overlay(
-                captured_board,
-                nodes,
-                path,
-                result,
+        cx = m["m10"] / m["m00"]
+        cy = m["m01"] / m["m00"]
+        r = math.sqrt(a / math.pi)
+
+        refined = refine_blob(diff, cx, cy, r, kernel)
+
+        if refined is None:
+            if debug:
+                print(f"refine failed at ({cx:.0f}, {cy:.0f}) area={a:.0f}")
+            continue
+
+        metrics = shape_metrics(refined)
+        if metrics is None:
+            continue
+
+        fill, tri = metrics
+
+        rm = cv2.moments(refined)
+        if rm["m00"] == 0:
+            continue
+
+        rarea = cv2.contourArea(refined)
+
+        nodes.append(
+            {
+                "type": None,
+                "fill": fill,
+                "tri": tri,
+                "score": tri - fill,          # high = triangle-like
+                "x": rm["m10"] / rm["m00"],
+                "y": rm["m01"] / rm["m00"],
+                "r": math.sqrt(rarea / math.pi),
+            }
+        )
+
+    return nodes
+
+
+def estimate_spacing(nodes):
+    """
+    Grid spacing = the most common nearest-neighbour distance.
+    Robust against stray fragments and duplicate detections.
+    """
+    if len(nodes) < 2:
+        return None
+
+    pts = np.array([[n["x"], n["y"]] for n in nodes])
+    d = np.linalg.norm(pts[:, None] - pts[None], axis=2)
+    np.fill_diagonal(d, np.inf)
+    nn = d.min(axis=1)
+
+    best_members = None
+
+    for c in nn:
+        members = nn[(nn > 0.85 * c) & (nn < 1.15 * c)]
+        if best_members is None or len(members) > len(best_members):
+            best_members = members
+
+    return float(np.median(best_members))
+
+
+def dedupe(nodes, spacing):
+    """Merge nodes closer together than half the grid spacing."""
+    kept = []
+
+    for n in sorted(nodes, key=lambda n: -n["r"]):
+        if all(
+            math.hypot(n["x"] - k["x"], n["y"] - k["y"]) > 0.5 * spacing
+            for k in kept
+        ):
+            kept.append(n)
+
+    return kept
+
+
+def keep_main_cluster(nodes, spacing):
+    """
+    Keep only the largest group of nodes that are chained together
+    by grid-sized gaps. Everything outside the graph is discarded.
+    """
+    n = len(nodes)
+    if n == 0:
+        return nodes
+
+    link = 1.3 * spacing
+    seen = [False] * n
+    best = []
+
+    for s in range(n):
+        if seen[s]:
+            continue
+
+        comp = [s]
+        seen[s] = True
+        stack = [s]
+
+        while stack:
+            i = stack.pop()
+            for j in range(n):
+                if seen[j]:
+                    continue
+                d = math.hypot(
+                    nodes[i]["x"] - nodes[j]["x"],
+                    nodes[i]["y"] - nodes[j]["y"],
+                )
+                if d <= link:
+                    seen[j] = True
+                    comp.append(j)
+                    stack.append(j)
+
+        if len(comp) > len(best):
+            best = comp
+
+    return [nodes[i] for i in best]
+
+
+# ----------------------------------------------------------------------
+# Typing: start (triangle) first, then circle vs square
+# ----------------------------------------------------------------------
+
+def circle_square_threshold(fills):
+    """
+    Split the remaining nodes into two groups by fill (two-means).
+    Circles have the high fill, squares the lower. Falls back to a
+    fixed value if the two groups are not clearly separate.
+    """
+    if len(fills) < 4:
+        return 0.80
+
+    lo, hi = min(fills), max(fills)
+
+    for _ in range(25):
+        t = (lo + hi) / 2.0
+        a = [f for f in fills if f < t]
+        b = [f for f in fills if f >= t]
+        if a:
+            lo = float(np.mean(a))
+        if b:
+            hi = float(np.mean(b))
+
+    if hi - lo < 0.08:
+        return 0.80
+
+    return (lo + hi) / 2.0
+
+
+def assign_types(nodes, debug=False):
+    """
+    There is always exactly one triangle: the node with the highest
+    triangle score (tri - fill). No fixed cut-off, so it is always found.
+    Every other node is a circle (H) or square (P).
+    """
+    if not nodes:
+        return 0.80
+
+    start = max(range(len(nodes)), key=lambda i: nodes[i]["score"])
+
+    others = [n["fill"] for i, n in enumerate(nodes) if i != start]
+    thr = circle_square_threshold(others)
+
+    for i, n in enumerate(nodes):
+        if i == start:
+            n["type"] = "S"
+        else:
+            n["type"] = "H" if n["fill"] >= thr else "P"
+
+    if debug:
+        ranked = sorted(nodes, key=lambda n: -n["score"])[:3]
+        print("start candidates (score, tri, fill):")
+        for n in ranked:
+            print(f"  ({n['x']:.0f}, {n['y']:.0f}) "
+                  f"score={n['score']:.2f} tri={n['tri']:.2f} "
+                  f"fill={n['fill']:.2f}")
+        print(f"circle/square fill threshold: {thr:.2f}")
+
+    return thr
+
+
+def set_start(nodes, new_idx, thr):
+    """Move the S label to another node."""
+    for n in nodes:
+        if n["type"] == "S":
+            n["type"] = "H" if n["fill"] >= thr else "P"
+
+    nodes[new_idx]["type"] = "S"
+
+
+# ----------------------------------------------------------------------
+# Graph building
+# ----------------------------------------------------------------------
+
+def line_exists(line_map, a, b, samples=24):
+    """
+    line_map is the (dilated) darkness map. A connector exists if the
+    middle part of the segment is consistently darker than the page.
+    """
+    hits = 0
+    total = 0
+
+    for t in np.linspace(0.3, 0.7, samples):
+        x = int(a["x"] + t * (b["x"] - a["x"]))
+        y = int(a["y"] + t * (b["y"] - a["y"]))
+
+        if 0 <= x < line_map.shape[1] and 0 <= y < line_map.shape[0]:
+            total += 1
+            if line_map[y, x] > LINE_THRESH:
+                hits += 1
+
+    return total > 0 and hits >= 0.7 * total
+
+
+def build_graph(nodes, board, spacing):
+    if len(nodes) < 2:
+        return {}
+
+    # connector lines: faint and thin; tolerate small positional error
+    line_map = darkness(board, blur=5)
+    line_map = cv2.dilate(line_map, np.ones((5, 5), np.uint8))
+
+    adj = {i: [] for i in range(len(nodes))}
+
+    for i in range(len(nodes)):
+        for j in range(i + 1, len(nodes)):
+            d = math.hypot(
+                nodes[i]["x"] - nodes[j]["x"],
+                nodes[i]["y"] - nodes[j]["y"],
             )
 
-            while True:
+            # direct grid neighbours only (rejects diagonals and far nodes)
+            if not (0.7 * spacing <= d <= 1.3 * spacing):
+                continue
 
-                display = parsed.copy()
+            if line_exists(line_map, nodes[i], nodes[j]):
+                adj[i].append(j)
+                adj[j].append(i)
 
-                if result is not None:
-                    txt = str(result)
-                    colour = (0, 255, 0)
-                else:
-                    txt = "No valid chain detected"
-                    colour = (0, 0, 255)
+    edges = sum(len(v) for v in adj.values()) // 2
+    print(f"grid spacing: {spacing:.0f}px, edges found: {edges}")
 
-                cv2.putText(
-                    display,
-                    txt[:120],
-                    (10, 35),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.7,
-                    colour,
-                    2,
-                )
+    return adj
 
-                cv2.putText(
-                    display,
-                    "SPACE=accept   r=retake   q=quit",
-                    (10, display.shape[0] - 20),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.7,
-                    (0, 255, 255),
-                    2,
-                )
 
-                cv2.imshow("lattice parser", display)
+# ----------------------------------------------------------------------
+# Walking the chain and producing F / L / R + H / P
+# ----------------------------------------------------------------------
 
-                key = cv2.waitKey(1) & 0xFF
+def _turn(v_prev, v_next):
+    """
+    F = same direction as the previous step
+    L / R = left / right turn relative to the previous step
+    Image y points down, so a positive cross product is a right turn.
+    """
+    cross = v_prev[0] * v_next[1] - v_prev[1] * v_next[0]
+    dot = v_prev[0] * v_next[0] + v_prev[1] * v_next[1]
 
-                if key == ord("q"):
-                    return None
+    ang = math.degrees(math.atan2(cross, dot))
 
-                if key == ord("r"):
-                    break
+    if abs(ang) < 45:
+        return "F"
+    if abs(ang) > 135:
+        return "B"      # should not happen on a simple chain
 
-                if key == ord(" "):
-                    return result
+    return "R" if ang > 0 else "L"
 
-    finally:
-        vid.release()
+
+def walk_chain(nodes, adj):
+    """
+    Walks from the start (triangle) node along the chain.
+
+    Returns (steps, path) where steps is a list with one entry per node
+    AFTER the start: (move, type)
+        move = how we turned to arrive at that node
+               (F = kept the previous direction, L, R)
+        type = "H" (circle) or "P" (square)
+
+    The first step has no previous direction, so it is always "F".
+    """
+    start = next(
+        (i for i, n in enumerate(nodes) if n["type"] == "S"),
+        None,
+    )
+
+    if start is None:
+        return None, []
+
+    path = [start]
+    visited = {start}
+    current = start
+
+    while True:
+        nxt = [j for j in adj[current] if j not in visited]
+
+        if not nxt:
+            break
+
+        if len(nxt) > 1:
+            nxt.sort(key=lambda j: len(adj[j]))
+
+        current = nxt[0]
+        path.append(current)
+        visited.add(current)
+
+    steps = []
+    prev_vec = None
+
+    for k in range(1, len(path)):
+        a = nodes[path[k - 1]]
+        b = nodes[path[k]]
+
+        vec = (b["x"] - a["x"], b["y"] - a["y"])
+
+        move = "F" if prev_vec is None else _turn(prev_vec, vec)
+
+        steps.append((move, b["type"]))
+        prev_vec = vec
+
+    return steps, path
+
+
+# ----------------------------------------------------------------------
+# Full pipeline
+# ----------------------------------------------------------------------
+
+def parse_frame(frame, debug=False):
+    """
+    camera/image -> (optional board outline) -> upscale -> detect shapes
+    -> spacing -> keep main cluster -> pick start -> graph -> walk chain
+
+    Returns (steps, nodes, path, board). board is never None.
+    """
+    if RAW_MODE:
+        print("RAW mode: using the whole image as the board")
+        board = frame.copy()
+    else:
+        board, _ = find_board(frame)
+        if board is None:
+            print("No board outline found, using the whole image as the board")
+            board = frame.copy()
+
+    board = normalise(board)
+
+    nodes = detect_shapes(board, debug=debug)
+
+    if not nodes:
+        print("FAILED: no nodes detected (lower COARSE_THRESH / CORE_MIN)")
+        return None, nodes, [], board
+
+    spacing = estimate_spacing(nodes)
+
+    if spacing is None:
+        print("FAILED: not enough nodes to estimate spacing")
+        return None, nodes, [], board
+
+    before = len(nodes)
+    nodes = dedupe(nodes, spacing)
+
+    # discard everything outside the graph, then re-measure the spacing
+    nodes = keep_main_cluster(nodes, spacing)
+    spacing = estimate_spacing(nodes) or spacing
+
+    thr = assign_types(nodes, debug=debug)
+
+    counts = {t: sum(1 for n in nodes if n["type"] == t) for t in "HPS"}
+    print(f"Nodes detected: {len(nodes)} (discarded {before - len(nodes)} "
+          f"duplicates/outliers) types: {counts}")
+
+    adj = build_graph(nodes, board, spacing)
+
+    if not any(adj.values()):
+        print("FAILED: no edges found (lower LINE_THRESH)")
+        return None, nodes, [], board
+
+    start_idx = next(i for i, n in enumerate(nodes) if n["type"] == "S")
+
+    # The start must be the end of a chain. If the chosen node is not
+    # connected to anything, use the most triangle-like chain end instead.
+    if not adj[start_idx]:
+        ends = [i for i in adj if len(adj[i]) == 1]
+
+        print(f"Start candidate at ({nodes[start_idx]['x']:.0f}, "
+              f"{nodes[start_idx]['y']:.0f}) has no connector; "
+              f"trying {len(ends)} chain ends")
+
+        if ends:
+            start_idx = max(ends, key=lambda i: nodes[i]["score"])
+            set_start(nodes, start_idx, thr)
+
+    if debug:
+        s = nodes[start_idx]
+        print(f"start node at ({s['x']:.0f}, {s['y']:.0f}), "
+              f"neighbours: {len(adj[start_idx])}")
+
+        for j, n in enumerate(nodes):
+            if j == start_idx:
+                continue
+            d = math.hypot(n["x"] - s["x"], n["y"] - s["y"])
+            if d < 1.6 * spacing:
+                print(f"  near start: {n['type']} at "
+                      f"({n['x']:.0f}, {n['y']:.0f}) dist={d:.0f} "
+                      f"(connected={j in adj[start_idx]})")
+
+    steps, path = walk_chain(nodes, adj)
+
+    if not steps:
+        print("FAILED: start node has no connected neighbour "
+              "(see 'near start' lines above)")
+    else:
+        print(f"Walked {len(path)} nodes out of {len(nodes)} detected")
+
+    return steps, nodes, path, board
+
+
+# ----------------------------------------------------------------------
+# Drawing
+# ----------------------------------------------------------------------
+
+def draw_overlay(image, nodes, path):
+    out = image.copy()
+
+    for i in range(len(path) - 1):
+        a = nodes[path[i]]
+        b = nodes[path[i + 1]]
+
+        cv2.line(
+            out,
+            (int(a["x"]), int(a["y"])),
+            (int(b["x"]), int(b["y"])),
+            (0, 255, 255),
+            3,
+        )
+
+    for node in nodes:
+        colour = COLOURS.get(node["type"], (255, 255, 255))
+
+        cv2.circle(
+            out,
+            (int(node["x"]), int(node["y"])),
+            int(max(5, node["r"])),
+            colour,
+            2,
+        )
+
+        cv2.putText(
+            out,
+            str(node["type"]),
+            (int(node["x"]) - 8, int(node["y"]) - int(node["r"]) - 4),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            colour,
+            2,
+        )
+
+    return out
+
+
+def fit_for_screen(img, max_side=1000):
+    h, w = img.shape[:2]
+    s = max_side / float(max(h, w))
+    if s >= 1:
+        return img
+    return cv2.resize(img, None, fx=s, fy=s, interpolation=cv2.INTER_AREA)
+
+
+def report(steps):
+    print()
+
+    if not steps:
+        print("No path found (see the FAILED line above for the reason)")
+        print()
+        return
+
+    """
+    print("Path (move, type):")
+    for i, (move, node_type) in enumerate(steps, 1):
+        print(f"  {i:2d}: {move} {node_type}")
+    """
+
+    print()
+    print("Compact:", " ".join(f"{m}{t}" for m, t in steps))
+    print("Moves:  ", "".join(m for m, _ in steps))
+    print("Types:  ", "".join(t for _, t in steps))
+    print()
+
+
+# ----------------------------------------------------------------------
+# Entry points
+# ----------------------------------------------------------------------
+
+def image(source, show=False):
+    frame = cv2.imread(source)
+
+    if frame is None:
+        raise FileNotFoundError(source)
+
+    steps, nodes, path, board = parse_frame(frame, debug=False)
+
+    report(steps)
+
+    overlay = draw_overlay(board, nodes, path)
+    cv2.imwrite("debug_overlay.png", overlay)
+
+    if show:
+        cv2.imshow("Parser Output", fit_for_screen(overlay))
+        cv2.waitKey(0)
         cv2.destroyAllWindows()
 
-if __name__ == "__main__":
+    return steps
+
+
+def snapshot(camera=0):
+    cap = cv2.VideoCapture(camera)
+
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
+
+    if not cap.isOpened():
+        raise RuntimeError("Could not open camera")
+
+    try:
+        for _ in range(30):
+            cap.read()
+
+        ret, frame = cap.read()
+
+        if not ret:
+            raise RuntimeError("Could not capture image")
+
+        steps, nodes, path, board = parse_frame(frame, debug=False)
+
+        report(steps)
+
+        overlay = draw_overlay(board, nodes, path)
+        cv2.imshow("Captured Image", fit_for_screen(overlay))
+        cv2.waitKey(0)
+
+        return steps
+
+    finally:
+        cap.release()
+        cv2.destroyAllWindows()
+
+
+def video(camera=0):
+    cap = cv2.VideoCapture(camera)
+
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
+
+    if not cap.isOpened():
+        raise RuntimeError("Could not open camera")
+
+    print()
+    print("SPACE = capture")
+    print("Q     = quit")
+    print()
+
+    try:
+        while True:
+            ret, frame = cap.read()
+
+            if not ret:
+                break
+
+            display = frame.copy()
+
+            _, corners = find_board(frame)
+
+            if corners is not None:
+                cv2.polylines(
+                    display,
+                    [corners.astype(np.int32)],
+                    True,
+                    (0, 255, 255),
+                    3,
+                )
+
+            cv2.imshow("Graph Scanner", display)
+
+            key = cv2.waitKey(1) & 0xFF
+
+            if key == ord("q"):
+                break
+
+            if key == ord(" "):
+                steps, nodes, path, board = parse_frame(frame, debug=False)
+
+                report(steps)
+
+                overlay = draw_overlay(board, nodes, path)
+                cv2.imshow("Detected Graph", fit_for_screen(overlay))
+                cv2.waitKey(0)
+
+    finally:
+        cap.release()
+        cv2.destroyAllWindows()
+
+
+def main():
     args = sys.argv[1:]
-    if not args or args[0] == "--video":
-        # 0 = default
-        # 2 = Virtual Camera (OBS)
-        print(video())
-    elif args[0] == "--snapshot":
-        print(image(None, show=True))
-    else:
-        print(image(args[0], show="--show" in args))
+
+    if "--video" in args:
+        video()
+        return
+
+    if "--snapshot" in args:
+        snapshot()
+        return
+
+    files = [a for a in args if not a.startswith("--")]
+
+    if files:
+        image(files[0], show=True)
+        return
+
+    print(
+        "Usage:\n"
+        "  python graph_scanner.py image.png [--raw]\n"
+        "  python graph_scanner.py --video\n"
+        "  python graph_scanner.py --snapshot\n"
+        "\n"
+        "  --raw  skip board-outline detection (use for already-cropped images)"
+    )
+
+
+if __name__ == "__main__":
+    main()

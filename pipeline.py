@@ -45,16 +45,14 @@ if __name__ == "__main__":
 
     result = image(file_path)
     turns = ""
-    prev_dir = result[0][1]
     for i in result:
-        if i[0] == "H":
-            if prev_dir == "left":
+        if i[1] == "H":
+            if i[0] == "L":
                 turns += "L"
-            elif prev_dir == "right":
+            elif i[0] == "R":
                 turns += "R"
             else:
                 turns += "F"
-        prev_dir = i[1]
         
     l = len(turns) // 3
     t1, t2, t3 = turns[:l], turns[l:l*2], turns[l*2:]
