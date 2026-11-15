@@ -83,9 +83,9 @@ if __name__ == "__main__":
     ap.add_argument("-w1", "--word1", required=True, help="First word to encoding")
     ap.add_argument("-w2", "--word2", required=True, help="Second word to encoding")
     ap.add_argument("-w3", "--word3", required=True, help="Third word to encoding")
-    ap.add_argument("-o", "--ouput", default="proteins", help="Output directory for visualisation")
+    ap.add_argument("-o", "--output", default="proteins", help="Output directory for visualisation")
     ap.add_argument("-s", "--seed", default=1, help="Seed for random number generator")
-
+    
     set_seed = int(ap.parse_args().seed)
     random.seed(set_seed)
     args = ap.parse_args()
@@ -106,4 +106,4 @@ if __name__ == "__main__":
     if word_sequence is None:
         print("No valid folding sequence found for the given words.")
     else:
-        visualise_sequence(sequence=word_sequence, filename=f"{word_combined}.png", output_dir=args.ouput)
+        visualise_sequence(sequence=word_sequence, filename=f"{word_combined}.png", output_dir=args.output)

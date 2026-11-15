@@ -77,6 +77,8 @@ x = [('S', 'strait'), ('P', 'left'), ('H', 'left'), ('P', 'strait'), ('H', 'left
 
 x = [('S', 'strait'), ('P', 'left'), ('H', 'left'), ('H', 'strait'), ('P', 'left'), ('H', 'right'), ('P', 'left'), ('H', 'left'), ('H', 'strait'), ('P', 'strait'), ('P', 'right'), ('P', 'left'), ('H', 'left'), ('H', 'strait'), ('P', 'strait'), ('P', 'right'), ('P', 'left'), ('H', 'left'), ('H', 'strait'), ('H', 'right'), ('P', 'left'), ('H', 'strait'), ('H', 'right'), ('H', 'right'), ('H', 'left'), ('H', 'strait'), ('H', 'strait'), ('H', 'right'), ('H', 'right'), ('H', 'left'), ('P', 'right'), ('H', 'strait'), ('H', 'strait'), ('H', 'left'), ('P', 'strait'), ('H', 'right'), ('H', 'left'), ('H', 'strait'), ('H', 'strait'), ('H', 'left'), ('H', 'strait'), ('H', 'left'), ('H', None)]
 
+x = [('S', 'strait'), ('P', 'left'), ('H', 'left'), ('H', 'strait'), ('P', 'left'), ('H', 'strait'), ('H', 'strait'), ('H', 'right'), ('H', 'left'), ('H', 'strait'), ('H', 'strait'), ('H', 'strait'), ('H', 'left'), ('H', 'left'), ('H', 'strait'), ('P', 'right'), ('P', 'left'), ('H', 'right'), ('H', 'strait'), ('H', 'strait'), ('H', 'strait'), ('H', 'right'), ('H', 'left'), ('H', 'left'), ('H', 'strait'), ('P', 'left'), ('H', 'right'), ('H', 'left'), ('H', 'strait'), ('H', 'right'), ('H', 'strait'), ('H', 'right'), ('H', 'right'), ('H', 'left'), ('P', 'strait'), ('P', 'right'), ('H', 'left'), ('H', None)]
+
 turns = ""
 prev_dir = x[0][1]
 for i in x:
